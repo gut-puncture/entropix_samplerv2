@@ -149,3 +149,6 @@ Thumbs.db *.bin
 *.ckpt
 env/
 venv/
+
+# Added for Phi-3 Mini 4k Instruct model files
+/assets/phi-3-mini-4k-instruct-model/
