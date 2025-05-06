@@ -3,26 +3,33 @@ Handles the loading of the frozen Small Language Model (SLM) and its tokenizer.
 """
 
 from typing import Tuple
+from pathlib import Path
 
-# Attempt to import PyTorch and Transformers, but allow for placeholder if not yet installed
+# Attempt to import PyTorch and Transformers, but fallback to placeholder on any failure
 try:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
     # Specify the return type more accurately if torch.nn.Module is too general later
-    ModelType = torch.nn.Module 
+    ModelType = torch.nn.Module
     TokenizerType = AutoTokenizer
-except ImportError:
-    print("Warning: PyTorch or Transformers not fully installed. SLM loader will use placeholders.")
+except Exception as e:
+    print(f"Warning: Could not import PyTorch or Transformers ({e}). SLM loader will use placeholders.")
     # Define placeholder types if imports fail, useful for initial skeleton setup
-    class PlaceholderModel:
+    try:
+        BaseModel = torch.nn.Module
+    except Exception:
+        BaseModel = object
+    class PlaceholderModel(BaseModel):
+        """A placeholder model for environments without torch/transformers."""
         pass
     class PlaceholderTokenizer:
+        """A placeholder tokenizer with basic encode/decode methods."""
         def __init__(self, special_tokens_map=None):
             self.special_tokens_map = special_tokens_map or {}
-        def encode(self, text):
-            return [0, 1, 2] # Dummy encoding
-        def decode(self, tokens):
-            return "dummy text" # Dummy decoding
+        def encode(self, text, add_special_tokens=False):
+            return [0, 1, 2]  # Dummy encoding
+        def decode(self, tokens, skip_special_tokens=False):
+            return "dummy text"  # Dummy decoding
         def add_special_tokens(self, special_tokens_dict):
             pass
         @property
@@ -32,7 +39,7 @@ except ImportError:
     ModelType = PlaceholderModel
     TokenizerType = PlaceholderTokenizer 
 
-from config import cfg
+from config import cfg # Use the global cfg instance
 
 def load_slm() -> Tuple[ModelType, TokenizerType]:
     """
@@ -76,37 +83,78 @@ def load_slm() -> Tuple[ModelType, TokenizerType]:
         return model, tokenizer
     # --- End Placeholder Implementation ---
 
-    # Actual implementation will go here in Step 3 of Phase 2
-    # For now, to allow the test to run, we'll raise a NotImplementedError if not in placeholder mode.
-    raise NotImplementedError("SLM loading (model and tokenizer) is not yet implemented.")
+    # Actual implementation: load model via MPS float16 fallback or dynamic quantization on CPU
+    if torch.backends.mps.is_available():
+        print("MPS device available. Loading model in float16 on MPS.")
+        model = AutoModelForCausalLM.from_pretrained(
+            cfg.slm.model_name,
+            torch_dtype=torch.float16,
+            low_cpu_mem_usage=True
+        )
+        model.to("mps")
+    else:
+        print("No MPS device available. Loading model with dynamic quantization on CPU.")
+        model = AutoModelForCausalLM.from_pretrained(
+            cfg.slm.model_name,
+            low_cpu_mem_usage=True
+        )
+        print("Applying dynamic quantization to linear modules.")
+        model = torch.quantization.quantize_dynamic(
+            model, {torch.nn.Linear}, dtype=torch.qint8
+        )
+
+    # 3. Load tokenizer and add special tokens
+    tokenizer = AutoTokenizer.from_pretrained(cfg.slm.model_name, use_fast=True)
+    special_tokens = [
+        cfg.slm.special_tokens.assistant_thought_begin,
+        cfg.slm.special_tokens.assistant_thought_end
+    ]
+    tokenizer.add_special_tokens({"additional_special_tokens": special_tokens})
+
+    # 4. Resize token embeddings and save tokenizer
+    model.resize_token_embeddings(len(tokenizer))
+    save_dir = Path("assets/tokenizer_extended")
+    save_dir.mkdir(parents=True, exist_ok=True)
+    tokenizer.save_pretrained(save_dir)
+
+    # 5. Freeze model and set to eval mode
+    model.eval()
+    for p in model.parameters():
+        p.requires_grad = False
+
+    return model, tokenizer
 
 if __name__ == "__main__":
-    # Example usage (will use placeholders or raise NotImplementedError initially)
     try:
         model, tokenizer = load_slm()
         print(f"Model type: {type(model)}")
         print(f"Tokenizer type: {type(tokenizer)}")
-        
-        if not isinstance(model, PlaceholderModel):
-            # Basic test with special tokens if actual tokenizer is loaded
-            special_tokens_dict = {
-                'additional_special_tokens': [
-                    cfg.slm.special_tokens.assistant_thought_begin,
-                    cfg.slm.special_tokens.assistant_thought_end
-                ]
-            }
-            # tokenizer.add_special_tokens(special_tokens_dict) # This would be part of the actual load_slm
-            
-            thought_begin = cfg.slm.special_tokens.assistant_thought_begin
-            thought_end = cfg.slm.special_tokens.assistant_thought_end
-            
-            encoded_begin = tokenizer.encode(thought_begin, add_special_tokens=False)
-            decoded_begin = tokenizer.decode(encoded_begin, skip_special_tokens=False)
-            print(f"Encoded '{thought_begin}': {encoded_begin} -> Decoded: '{decoded_begin}'")
 
-            encoded_end = tokenizer.encode(thought_end, add_special_tokens=False)
-            decoded_end = tokenizer.decode(encoded_end, skip_special_tokens=False)
-            print(f"Encoded '{thought_end}': {encoded_end} -> Decoded: '{decoded_end}'")
+        print("\n--- Attempting Generation with Loaded Model ---")
+        try:
+            import torch
+            prompt = "Hello, can you tell me a short story?"
+            print(f"Prompt: {prompt}")
 
+            # Tokenize and prepare inputs
+            inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
+            # Move inputs to the same device as model
+            device = next(model.parameters()).device
+            inputs = inputs.to(device)
+
+            print("Generating response...")
+            with torch.no_grad():
+                output_sequences = model.generate(
+                    input_ids=inputs['input_ids'],
+                    attention_mask=inputs['attention_mask'],
+                    max_new_tokens=50
+                )
+            response = tokenizer.decode(output_sequences[0], skip_special_tokens=True)
+            print(f"Generated Response: {response}")
+        except ImportError:
+            print("Torch is not available, cannot perform generation test.")
+        except Exception as e:
+            print(f"Error during generation test: {e}")
+        print("--- End Generation Test ---")
     except Exception as e:
         print(f"Error during example usage: {e}") 

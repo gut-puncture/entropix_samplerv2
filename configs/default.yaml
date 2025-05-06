@@ -4,7 +4,7 @@
 
 # --- Phase 3: Frozen Small Language Model (SLM) ---
 slm:
-  model_name: "Phi-3-Mini-128k-Instruct" # (3.8 B params) Chosen for its balance of capability and resource requirements.
+  model_name: "microsoft/Phi-3-mini-4k-instruct" # (3.8 B params) Chosen for its balance of capability and resource requirements.
   context_length: 131072 # (128k tokens) Max context length supported by the model.
   generation_max_length: 512 # Actual cap for generation during experiments.
   quantization: "4-bit" # bitsandbytes quantization to fit in ~5GB RAM.

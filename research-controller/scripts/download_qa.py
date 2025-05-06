@@ -7,23 +7,44 @@ Usage:
 
 import os
 import json
-from datasets import load_dataset
+import json
+import os
+import pyarrow.parquet as pq
+from huggingface_hub import hf_hub_download
 
-def save_dataset(ds, name):
-    # Ensure data directory exists
-    os.makedirs(os.path.join(os.path.dirname(__file__), "..", "data"), exist_ok=True)
-    output_path = os.path.join(os.path.dirname(__file__), "..", "data", f"{name}.jsonl")
+def save_dataset(ds, name: str):
+    """
+    Save a HuggingFace Dataset to a JSONL file under the data/ directory.
+    """
+    data_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+    os.makedirs(data_dir, exist_ok=True)
+    output_path = os.path.join(data_dir, f"{name}.jsonl")
     with open(output_path, "w") as f:
-        for example in ds:
-            f.write(json.dumps(example) + "\n")
+        for record in ds:
+            f.write(json.dumps(record) + "\n")
     print(f"Saved {len(ds)} examples to {output_path}")
 
 def main():
-    # Load validation splits
-    squad = load_dataset("squad", split="validation")
-    boolq = load_dataset("boolq", split="validation")
-    save_dataset(squad, "squad")
-    save_dataset(boolq, "boolq")
+    """
+    Download SQuAD and BoolQ validation splits via huggingface_hub and save as JSONL.
+    """
+    # SQuAD: stored as parquet under plain_text/
+    squad_parquet = hf_hub_download(
+        repo_id="squad", repo_type="dataset",
+        filename="plain_text/validation-00000-of-00001.parquet"
+    )
+    squad_table = pq.read_table(squad_parquet)
+    squad_records = squad_table.to_pylist()
+    save_dataset(squad_records, "squad")
+
+    # BoolQ: stored as parquet under data/
+    boolq_parquet = hf_hub_download(
+        repo_id="boolq", repo_type="dataset",
+        filename="data/validation-00000-of-00001.parquet"
+    )
+    boolq_table = pq.read_table(boolq_parquet)
+    boolq_records = boolq_table.to_pylist()
+    save_dataset(boolq_records, "boolq")
 
 if __name__ == "__main__":
     main()

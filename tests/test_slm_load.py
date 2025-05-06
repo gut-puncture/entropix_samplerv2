@@ -14,8 +14,8 @@ try:
     import torch
     from transformers import AutoTokenizer # Check for a real tokenizer class
     if not issubclass(ModelType, torch.nn.Module) or TokenizerType == type(None):
-        IS_PLACEHOLDER_MODE = True 
-except ImportError:
+        IS_PLACEHOLDER_MODE = True
+except Exception:
     IS_PLACEHOLDER_MODE = True
 
 # If actual torch is imported, ModelType should be torch.nn.Module

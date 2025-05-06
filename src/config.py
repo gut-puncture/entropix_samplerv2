@@ -23,7 +23,7 @@ class SLMSpecialTokensConfig:
 
 @dataclass
 class SLMConfig:
-    model_name: str = "Phi-3-Mini-128k-Instruct"
+    model_name: str = "microsoft/Phi-3-mini-4k-instruct"
     context_length: int = 131072
     generation_max_length: int = 512
     quantization: str = "4-bit"
