@@ -1,0 +1,154 @@
+# Default Hyperparameters for AlphaZero-Style Macro-Action Controller
+# This file serves as the central configuration for the research project.
+# It mirrors the parameters and settings discussed in the research_plan.md.
+
+# --- Phase 3: Frozen Small Language Model (SLM) ---
+slm:
+  model_name: "Phi-3-Mini-128k-Instruct" # (3.8 B params) Chosen for its balance of capability and resource requirements.
+  context_length: 131072 # (128k tokens) Max context length supported by the model.
+  generation_max_length: 512 # Actual cap for generation during experiments.
+  quantization: "4-bit" # bitsandbytes quantization to fit in ~5GB RAM.
+  special_tokens: # Tokens for guiding internal thought processes.
+    assistant_thought_begin: "<assistant_thought>"
+    assistant_thought_end: "</assistant_thought>"
+
+# --- Phase 4: Datasets ---
+datasets:
+  prompt_seeds:
+    name: "wikitext"
+    subset: "wikitext-2-raw-v1"
+    split: "train"
+    min_prompt_words: 20 # Filter for prompts with more than 20 words.
+    cache_path: "data/prompts.json"
+    sentences_cache_path: "data/prompts_sentences.jsonl"
+  topic_drift_embeddings:
+    model: "text-embedding-3-large" # OpenAI model for embeddings.
+    cache_path: "assets/embeds.npy" # Pre-computed embeddings for prompt sentences.
+    embed_tasks_path: "data/embed_tasks.jsonl"
+  qa_eval:
+    squad: "squad" # SQuAD dataset for QA evaluation.
+    boolq: "boolq" # BoolQ dataset for QA evaluation.
+
+# --- Phase 5: Feature Extractor ---
+features:
+  # Entropy of next-token probabilities (post-softmax).
+  # High entropy indicates SLM uncertainty.
+  entropy:
+    enabled: true
+  # Margin between best and second-best token logits.
+  # Complements entropy.
+  logit_gap:
+    enabled: true
+  # Entropy normalized over a sliding window.
+  # Shows relative spikes, not absolute scale.
+  z_entropy:
+    enabled: true
+    window_size: 16
+  # Semantic similarity change between last two sentences.
+  # 0 = same topic, 1 = large change.
+  topic_drift:
+    enabled: true
+    # sentence_delimiter_tokens: [".", "!", "?"] # Handled by script
+  # Normalized position within the max context length.
+  # (current_length / max_context_length)
+  pos_in_prompt:
+    enabled: true
+  # Flag: 1 if inside <assistant_thought>...</assistant_thought>, 0 otherwise.
+  in_thought_flag:
+    enabled: true
+  # Mean-pooled last hidden layer of the SLM over the current sequence.
+  # Provides rich contextual information (e.g., tense, subject).
+  # Dimension: SLM's hidden size (e.g., 2048 for some models, Phi-3-Mini-128k-Instruct is 3072)
+  context_vec:
+    enabled: true
+    hidden_size: 3072 # For Phi-3-Mini-128k-Instruct
+
+# --- Phase 6: Macro-Action Execution ---
+macro_actions:
+  # Argmax: Select the most likely token.
+  argmax:
+    id: 0
+  # Branch: Explore top-k token continuations.
+  branch:
+    id: 1
+    k: 3 # Number of branches to explore.
+  # Resample: Backtrack to the last punctuation and try a different phrasing.
+  resample:
+    id: 2
+    # Punctuation tokens for backtracking are usually model-specific or defined in tokenizer.
+  # Think-Begin: Start an internal thought process.
+  think_begin:
+    id: 3
+  # Think-End: End an internal thought process.
+  think_end:
+    id: 4
+  # Temperature-Bump: Temporarily increase sampling temperature for one token.
+  temperature_bump:
+    id: 5
+    factor: 1.3 # Multiplicative factor for logits.
+
+# --- Phase 7: MCTS Inner Loop ---
+mcts:
+  simulations_per_step: 8 # Number of MCTS simulations to run at each decision point.
+  # UCB (Upper Confidence Bound for Trees) exploration constant.
+  # Balances exploration and exploitation. Higher c means more exploration.
+  ucb_c: 1.5
+  rollout_max_length: 32 # Max length for quick, plagiarism-safe rollouts.
+  simulations_epoch_10_plus: 16 # Increase simulations after epoch 10.
+
+# --- Phase 8: Self-Play Loop ---
+self_play:
+  # Max length of initial prompt segment for an episode.
+  # Shorter prompts lead to more turns per episode.
+  initial_prompt_max_length: 64
+  # Max total tokens for a generated sequence in an episode.
+  episode_max_tokens: 256
+  # Reward function components weights (to be tuned)
+  reward:
+    # Coherence, fluency, etc. (e.g., from KenLM or G-Eval)
+    coherence_weight: 1.0
+    # Penalty for overly long/short generations if needed
+    length_penalty_weight: 0.0
+
+# --- Phase 9: Training Step ---
+training:
+  batch_size: 256 # From replay buffer
+  learning_rate: 1.0e-4 # Initial learning rate.
+  # Weight for the value loss (MSE between predicted and target R).
+  value_loss_weight: 1.0
+  # Weight for the policy loss (cross-entropy between MCTS policy and network policy).
+  policy_loss_weight: 1.0
+  # Weight for the entropy bonus in the policy loss.
+  # Encourages exploration by preventing policy from becoming too deterministic.
+  entropy_bonus_weight: 0.01
+  # Gradient clipping norm to prevent exploding gradients.
+  grad_clip_norm: 1.0
+  optimizer: "AdamW" # or Adam, SGD etc.
+  scheduler: "CosineAnnealingLR" # or StepLR, None etc.
+  epochs: 20 # Example, total epochs to train for
+  save_every_seconds: 7200 # Checkpoint saving frequency (2 hours)
+
+# --- Phase 13: Long-Run Dry-Run ---
+long_run:
+  episodes: 5000 # Number of self-play episodes for a long run.
+  simulations: 8 # MCTS simulations for the long run.
+
+# --- KenLM (Reward Module) ---
+kenlm:
+  model_path: "assets/wiki_5gram.arpa" # Path to the KenLM model.
+  # If true, will attempt to download models using `python -m kenlm --download_models wiki_5gram`
+  auto_download: true
+  # Placeholder score if KenLM is not available or fails to load.
+  placeholder_score: 0.0
+
+# --- OpenAI API ---
+openai:
+  # API key should be set as an environment variable: OPENAI_API_KEY
+  # model_for_embeddings: "text-embedding-3-large" # Already defined under datasets.topic_drift_embeddings
+  # fallback_cache_delta_path: "logs/openai_last_delta_cache.json" # For risk mitigation
+
+# --- General ---
+# Seed for reproducibility
+random_seed: 42
+# Logging level: DEBUG, INFO, WARNING, ERROR
+log_level: "INFO" 

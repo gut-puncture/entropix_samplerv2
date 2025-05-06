@@ -1,0 +1,97 @@
+# Default configuration for AlphaZero-Style Macro-Action Controller
+# Mirrors sections in coding_requirements.md for easy cross-reference.
+
+# §3 Environment & Dependency Contract
+environment:
+  python_version: 3.11.6 # Ensure reproducibility
+  platform: "macOS >=15.4 or Linux" # Target platform
+  ram_limit_gb: 8 # Constraint for model choices
+  gpu_required: false # Designed for CPU-only operation
+
+# §4 Frozen SLM Specification
+slm:
+  model_name: "microsoft/Phi-3-Mini-128k-Instruct" # Base model identifier
+  load_bits: 4 # Quantization level (4-bit GPTQ)
+  tokenizer_path: "assets/tokenizer_extended/" # Where to save/load patched tokenizer
+  special_tokens: # Tokens added for private thoughts
+    - "<assistant_thought>"
+    - "</assistant_thought>"
+
+# §5 Macro-Action Catalogue
+macro_actions:
+  temp_bump_factor: 1.3 # Multiplier for Temp-Bump action logits
+  branch_entropy_threshold: 2.0 # Max entropy for allowing Branch action
+  branch_logit_gap_threshold: 1.0 # Min logit gap for allowing Branch action
+
+# §6 State Vector (Feature Extractor) Contract
+features:
+  dim: 2054 # Total dimension of the state vector
+  z_score_window: 16 # Rolling window length for z-entropy calculation
+  # topic_drift_model: "text-embedding-3-large" # Model for sentence embeddings (if using OpenAI)
+  # topic_drift_embed_dim: 3072 # Dimension of OpenAI embeddings
+
+# §7 MCTS Details
+mcts:
+  simulations_per_move_initial: 8 # Num simulations for epochs 0-9
+  simulations_per_move_final: 16 # Num simulations after epoch 9
+  c_puct: 1.5 # UCB exploration constant
+  rollout_max_len: 32 # Max tokens for MCTS rollouts
+  # visit_temp_inference: 1.0 # Temperature for sampling actions during inference (1.0 = proportional, 0.0 = argmax)
+
+# §8 Self-Play and Replay Buffer
+self_play:
+  max_episode_len: 256 # Max tokens per self-play episode
+
+buffer:
+  capacity: 500000 # Max transitions in replay buffer (500k)
+  storage_path: "data/replay_buffer.pkl" # File for disk-backed buffer
+
+# §9 Optimisation Loop
+network:
+  # Architecture defined in §1.8
+  input_dim: 2054
+  hidden_dim: 2048
+  policy_head_dims: [2048, 128, 6] # Hidden -> Policy logits
+  value_head_dims: [2048, 128, 1] # Hidden -> Value scalar
+  activation: "gelu"
+  norm_layer: "LayerNorm"
+  init_method: "xavier_uniform"
+  value_head_final_bias: 0.0
+
+training:
+  batch_size: 256 # State tuples per training batch
+  loss_entropy_coeff: 0.01 # Weight for entropy bonus in loss
+  optimizer: "AdamW"
+  adamw:
+    lr: 3.0e-4
+    betas: [0.9, 0.99]
+    weight_decay: 1.0e-2
+  lr_scheduler: "StepLR" # Halve LR every N steps
+  lr_step_size: 200000 # Number of optimizer steps before halving LR
+  grad_clip_norm: 1.0 # Max gradient norm
+  checkpoint_interval_hours: 2 # Save checkpoint every N hours
+  checkpoint_dir: "checkpoints/"
+
+# §10 Reward Calculus
+reward:
+  target_length: 256 # Center for length penalty
+  weights:
+    g_eval_coherence: 1.0
+    topic_drift: -0.2
+    kenlm_logprob: 1.0 # Weight per coding_requirements: +1.0 * kenlm_logprob
+    length_penalty: -0.002
+  # Normalization stats (to be filled in after dataset analysis or use defaults)
+  g_eval_mu: 0.0 # Placeholder: Mean G-Eval score on validation set
+  g_eval_sigma: 1.0 # Placeholder: Std Dev G-Eval score on validation set
+  kenlm_mu: 0.0 # Placeholder: Mean KenLM logprob/token on validation set
+  kenlm_sigma: 1.0 # Placeholder: Std Dev KenLM logprob/token on validation set
+
+# §12 Inference API Contract
+serve:
+  host: "127.0.0.1"
+  port: 8000
+  latency_target_ms: 3000 # Target for 256 tokens on M1 CPU
+
+# §14 Risk Controls
+risk_controls:
+  fallback_embedding_path: "assets/embeds.npy" # Path to pre-computed embeddings 
